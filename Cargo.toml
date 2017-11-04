@@ -1,0 +1,10 @@
+[package]
+name = "brute-canary"
+version = "0.1.0"
+authors = ["Peter Meehan <meehanp2@tcd.ie>"]
+
+[dependencies]
+rand = "0.3.17"
+num_cpus = "1.0"
+rust-crypto = "0.2.36"
+rustc-serialize = "0.3"
