@@ -2,8 +2,10 @@ extern crate rand;
 extern crate num_cpus;
 extern crate crypto;
 extern crate rustc_serialize;
+extern crate crossbeam;
 
-use std::{io, thread, process};
+use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use rand::Rng;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
@@ -40,51 +42,51 @@ fn main() {
   println!("Here we go, starting on wallet #{}", num_words);
 
   let num_threads = num_cpus::get();
+  println!("Spawning {} thread{}", num_threads, if num_threads == 1 {""} else {"s"});
   let mut child_threads = vec![];
-  for _ in 0..num_threads {
-    child_threads.push(thread::spawn(move || -> u8 {
-      println!("Spawned a thread!");
-      let mut not_finished = true;
-      let mut tries = 0;
-      let mut sha:[u8; PRIV_KEY_BYTE_SIZE] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 
-      while not_finished {
-        let mut passphrase_words = Vec::new();
-        for _ in 0..num_words {
-          passphrase_words.push(words[rand::thread_rng().gen_range(0, DICT_SIZE-1)]);
+  let not_finished = AtomicBool::new(true);
+  let not_finished_ref = &not_finished;
+
+  crossbeam::scope(|scope| {
+    for i in 0..num_threads {
+      child_threads.push(scope.spawn(move || {
+        let mut tries = 0;
+        let mut sha:[u8; PRIV_KEY_BYTE_SIZE] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+
+        while (*not_finished_ref).load(Ordering::Relaxed) {
+          let mut passphrase_words = Vec::new();
+          for _ in 0..num_words {
+            passphrase_words.push(words[rand::thread_rng().gen_range(0, DICT_SIZE-1)]);
+          }
+          let passphrase = passphrase_words.join(" ");
+
+          let mut hasher = Sha256::new();
+          hasher.input_str(&passphrase);
+          hasher.result(&mut sha);
+          let private_key = curve25519_base(&sha);
+          let private_key_hex = private_key.to_hex();
+
+          tries += 1;
+
+          if private_key_hex == public_keys[(num_words - 1)] {
+            println!("🌝 🌝 🌝 🌝 🌝");
+            println!("🌝 🌝 🌝 🌝 🌝");
+            println!("Thread: #{}", i);
+            println!("Tries: {}", tries);
+            println!("Passphrase: {}", passphrase);
+            println!("Private Key: {}", private_key_hex);
+            println!("🌝 🌝 🌝 🌝 🌝");
+            println!("🌝 🌝 🌝 🌝 🌝");
+            (*not_finished_ref).store(false, Ordering::Relaxed);
+          }
         }
-        let passphrase = passphrase_words.join(" ");
-
-        let mut hasher = Sha256::new();
-        hasher.input_str(&passphrase);
-        hasher.result(&mut sha);
-        let private_key = curve25519_base(&sha);
-        let private_key_hex = private_key.to_hex();
-
-        tries += 1;
-
-        if private_key_hex == public_keys[(num_words - 1)] {
-          println!("Tries: {}", tries);
-          println!("Passphrase: {}", passphrase);
-          println!("Private Key: {}", private_key_hex);
-          not_finished = false;
-        }
-
-        // // stop prematurely to compute guesses/sec
-        // if tries == 30000 {
-        //   println!("Tries: {}", tries);
-        //   println!("Passphrase: {}", passphrase);
-        //   println!("Private Key: {}", private_key_hex);
-        //   not_finished = false;
-        // }
-      }
-      0
-    }))
-  }
+        println!("Thread #{} tries: {}", i, tries);
+      }))
+    }
+  });
 
   for child in child_threads {
-    child.join().unwrap();
-    println!("Whoompo!");
-    process::exit(0);
+    child.join();
   }
 }
