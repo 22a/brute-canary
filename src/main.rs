@@ -3,7 +3,7 @@ extern crate num_cpus;
 extern crate crypto;
 extern crate rustc_serialize;
 
-// use std::io;
+use std::{io, thread, process};
 use rand::Rng;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
@@ -30,51 +30,61 @@ fn main() {
     "72d693d0e3eb17ab484cbb68e40edb9cb19c0e3e04a684b6325a479908451948"
   ];
 
-  // let mut input = String::new();
-  // io::stdin().read_line(&mut input)
-  //   .expect("Failed to read line");
-  // let num_words: usize = input.trim().parse()
-  //   .expect("I'm gonna need a number there, buddy!");
-  // assert!(num_words > 0 && num_words <= 12, "No can do, choose a wallet between 1 and 12.");
-  let num_words = 2;
+  let mut input = String::new();
+  io::stdin().read_line(&mut input)
+    .expect("Failed to read line");
+  let num_words: usize = input.trim().parse()
+    .expect("I'm gonna need a number there, buddy!");
+  assert!(num_words > 0 && num_words <= 12, "No can do, choose a wallet between 1 and 12.");
 
   println!("Here we go, starting on wallet #{}", num_words);
 
-  let mut not_finished = true;
-  let mut tries = 0;
-  let mut sha:[u8; PRIV_KEY_BYTE_SIZE] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  let num_threads = num_cpus::get();
+  let mut child_threads = vec![];
+  for _ in 0..num_threads {
+    child_threads.push(thread::spawn(move || -> u8 {
+      println!("Spawned a thread!");
+      let mut not_finished = true;
+      let mut tries = 0;
+      let mut sha:[u8; PRIV_KEY_BYTE_SIZE] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 
-  // TODO: some multithreading
-  // let num_threads = num_cpus::get();
+      while not_finished {
+        let mut passphrase_words = Vec::new();
+        for _ in 0..num_words {
+          passphrase_words.push(words[rand::thread_rng().gen_range(0, DICT_SIZE-1)]);
+        }
+        let passphrase = passphrase_words.join(" ");
 
-  while not_finished {
-    let mut passphrase_words = Vec::new();
-    for _ in 0..num_words {
-      passphrase_words.push(words[rand::thread_rng().gen_range(0, DICT_SIZE-1)]);
-    }
-    let passphrase = passphrase_words.join(" ");
+        let mut hasher = Sha256::new();
+        hasher.input_str(&passphrase);
+        hasher.result(&mut sha);
+        let private_key = curve25519_base(&sha);
+        let private_key_hex = private_key.to_hex();
 
-    let mut hasher = Sha256::new();
-    hasher.input_str(&passphrase);
-    hasher.result(&mut sha);
-    let private_key = curve25519_base(&sha);
-    let private_key_hex = private_key.to_hex();
+        tries += 1;
 
-    tries += 1;
+        if private_key_hex == public_keys[(num_words - 1)] {
+          println!("Tries: {}", tries);
+          println!("Passphrase: {}", passphrase);
+          println!("Private Key: {}", private_key_hex);
+          not_finished = false;
+        }
 
-    if private_key_hex == public_keys[(num_words - 1)] {
-      println!("Tries: {}", tries);
-      println!("Passphrase: {}", passphrase);
-      println!("Private Key: {}", private_key_hex);
-      not_finished = false;
-    }
+        // // stop prematurely to compute guesses/sec
+        // if tries == 30000 {
+        //   println!("Tries: {}", tries);
+        //   println!("Passphrase: {}", passphrase);
+        //   println!("Private Key: {}", private_key_hex);
+        //   not_finished = false;
+        // }
+      }
+      0
+    }))
+  }
 
-    // stop prematurely to compute guesses/sec
-    if tries == 30000 {
-      println!("Tries: {}", tries);
-      println!("Passphrase: {}", passphrase);
-      println!("Private Key: {}", private_key_hex);
-      not_finished = false;
-    }
+  for child in child_threads {
+    child.join().unwrap();
+    println!("Whoompo!");
+    process::exit(0);
   }
 }
